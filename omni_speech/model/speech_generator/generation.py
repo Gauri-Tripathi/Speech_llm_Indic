@@ -8,27 +8,76 @@ from typing import Optional, Union, List, Callable
 import torch.distributed as dist
 
 from transformers.generation.streamers import BaseStreamer
-from transformers.generation.utils import (
-    GenerationConfig,
-    GenerationMode,
-    LogitsProcessorList,
-    StoppingCriteriaList,
-    GenerateOutput, 
-    GenerationMixin,
-    GenerateEncoderDecoderOutput,
-    GenerateDecoderOnlyOutput,
-    GenerateNonBeamOutput,
-    is_deepspeed_zero3_enabled,
-    is_torchdynamo_compiling,
-    NEED_SETUP_CACHE_CLASSES_MAPPING,
-    QUANT_BACKEND_CLASSES_MAPPING,
-    is_hqq_available,
-    QuantizedCacheConfig,
-    is_quanto_available,
-    DynamicCache,
-    EncoderDecoderCache,
-    logging
-)
+
+# Handle different transformers versions
+try:
+    from transformers.generation.utils import (
+        GenerationConfig,
+        GenerationMode,
+        LogitsProcessorList,
+        StoppingCriteriaList,
+        GenerateOutput, 
+        GenerationMixin,
+        GenerateEncoderDecoderOutput,
+        GenerateDecoderOnlyOutput,
+        GenerateNonBeamOutput,
+        is_deepspeed_zero3_enabled,
+        is_torchdynamo_compiling,
+        NEED_SETUP_CACHE_CLASSES_MAPPING,
+        QUANT_BACKEND_CLASSES_MAPPING,
+        is_hqq_available,
+        QuantizedCacheConfig,
+        is_quanto_available,
+        DynamicCache,
+        EncoderDecoderCache,
+        logging
+    )
+except ImportError:
+    # Fallback for older transformers versions
+    from transformers.generation.utils import (
+        GenerationConfig,
+        LogitsProcessorList,
+        StoppingCriteriaList,
+        GenerationMixin,
+        logging
+    )
+    from transformers.generation.configuration_utils import GenerationMode
+    
+    # Provide fallback implementations
+    def is_torchdynamo_compiling():
+        try:
+            import torch._dynamo as dynamo
+            return dynamo.is_compiling()
+        except:
+            return False
+    
+    def is_deepspeed_zero3_enabled():
+        try:
+            import deepspeed
+            return hasattr(deepspeed, 'zero') and deepspeed.zero.is_initialized()
+        except:
+            return False
+    
+    def is_hqq_available():
+        return False
+    
+    def is_quanto_available():
+        return False
+    
+    # These may not exist in older versions
+    GenerateOutput = tuple
+    GenerateEncoderDecoderOutput = tuple
+    GenerateDecoderOnlyOutput = tuple
+    GenerateNonBeamOutput = tuple
+    NEED_SETUP_CACHE_CLASSES_MAPPING = {}
+    QUANT_BACKEND_CLASSES_MAPPING = {}
+    QuantizedCacheConfig = None
+    
+    try:
+        from transformers import DynamicCache, EncoderDecoderCache
+    except ImportError:
+        DynamicCache = None
+        EncoderDecoderCache = None
 # from transformers.generation.stopping_criteria import validate_stopping_criteria
 
 logger = logging.get_logger(__name__)

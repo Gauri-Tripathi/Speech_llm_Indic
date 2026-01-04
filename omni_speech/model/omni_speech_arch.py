@@ -83,7 +83,21 @@ class OmniSpeechMetaForCausalLM(ABC):
         speech_encoder_type = self.config.speech_encoder_type
         speech_encoder = self.get_speech_encoder()
         if "whisper" in speech_encoder_type.lower():
-            encoder_outs = speech_encoder(speech.permute(0, 2, 1))
+            # Handle both HuggingFace and OpenAI Whisper formats
+            # Input: speech is [batch, seq_len, mel_dim] for mel or [batch, seq_len] for raw
+            # Whisper expects [batch, mel_dim, seq_len]
+            if speech.dim() == 3:
+                speech_input = speech.permute(0, 2, 1)
+            else:
+                speech_input = speech
+            
+            # Check if it's HuggingFace WhisperEncoder
+            encoder_outs = speech_encoder(speech_input)
+            
+            # HuggingFace returns BaseModelOutput with last_hidden_state
+            if hasattr(encoder_outs, 'last_hidden_state'):
+                encoder_outs = encoder_outs.last_hidden_state
+            
             speech_lengths = (speech_lengths + 1) // 2
         else:
             raise ValueError(f'Unknown speech encoder: {speech_encoder}')

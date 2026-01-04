@@ -11,3 +11,5 @@ vocoder/
 whisper-large-v3 
 llama-3.2-3b
 llama_omni.egg-info
+prepared_data
+

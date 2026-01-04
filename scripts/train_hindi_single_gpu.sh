@@ -25,8 +25,8 @@ CUDA_VISIBLE_DEVICES=0 python omni_speech/train/train.py \
     --output_dir $OUTPUT_DIR \
     --s2s True \
     --unit_vocab_size 5100 \
-    --ctc_decoder_config "(2,3072,32,8192)" \
-    --ctc_upsample_factor 25 \
+    --ctc_decoder_config "(2,1024,8,2048)" \
+    --ctc_upsample_factor 10 \
     --ctc_loss_weight 1.0 \
     --speech_projector_type "linear" \
     --speech_encoder_ds_rate 5 \
@@ -37,7 +37,7 @@ CUDA_VISIBLE_DEVICES=0 python omni_speech/train/train.py \
     --bf16 True \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps 8 \
     --learning_rate 2e-5 \
     --weight_decay 0.01 \
     --warmup_ratio 0.03 \
@@ -45,7 +45,7 @@ CUDA_VISIBLE_DEVICES=0 python omni_speech/train/train.py \
     --logging_steps 1 \
     --save_steps 100 \
     --save_total_limit 2 \
-    --model_max_length 2048 \
+    --model_max_length 1024 \
     --gradient_checkpointing True \
-    --dataloader_num_workers 2 \
+    --dataloader_num_workers 0 \
     --report_to "none"

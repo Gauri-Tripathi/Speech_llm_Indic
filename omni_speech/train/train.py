@@ -69,6 +69,8 @@ class TrainingArguments(transformers.TrainingArguments):
     lora_bias: str = field(default="none")
     speech_projector_lr: Optional[float] = field(default=None)
     group_by_modality_length: bool = field(default=False)
+    # Important: Don't remove custom columns like speech, speech_length, tgt_units
+    remove_unused_columns: bool = field(default=False)
 
 
 class LazySupervisedDataset(Dataset):
@@ -91,37 +93,43 @@ class LazySupervisedDataset(Dataset):
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         item = self.list_data_dict[i]
         
-        # Load speech
-        speech_file = item["speech"]
-        speech = whisper.load_audio(speech_file)
-        
-        if self.data_args.input_type == "raw":
-            speech = torch.from_numpy(speech)
-            if self.data_args.speech_normalize:
-                speech = torch.nn.functional.layer_norm(speech, speech.shape)
-        elif self.data_args.input_type == "mel":
-            speech = whisper.pad_or_trim(speech)
-            speech = whisper.log_mel_spectrogram(speech, n_mels=self.data_args.mel_size).permute(1, 0)
-        
-        # Process conversations
-        sources = copy.deepcopy([item["conversations"]])
-        sources = preprocess_multimodal(sources, self.data_args)
-        data_dict = preprocess(sources, self.tokenizer, has_speech=True)
-        
-        if isinstance(i, int):
-            data_dict = dict(input_ids=data_dict["input_ids"][0],
-                           labels=data_dict["labels"][0])
+        try:
+            # Load speech
+            speech_file = item["speech"]
+            speech = whisper.load_audio(speech_file)
+            
+            if self.data_args.input_type == "raw":
+                speech = torch.from_numpy(speech)
+                if self.data_args.speech_normalize:
+                    speech = torch.nn.functional.layer_norm(speech, speech.shape)
+            elif self.data_args.input_type == "mel":
+                speech = whisper.pad_or_trim(speech)
+                speech = whisper.log_mel_spectrogram(speech, n_mels=self.data_args.mel_size).permute(1, 0)
+            
+            # Process conversations
+            sources = copy.deepcopy([item["conversations"]])
+            sources = preprocess_multimodal(sources, self.data_args)
+            data_dict = preprocess(sources, self.tokenizer, has_speech=True)
+            
+            if isinstance(i, int):
+                data_dict = dict(input_ids=data_dict["input_ids"][0],
+                               labels=data_dict["labels"][0])
 
-        data_dict["speech"] = speech
-        data_dict["speech_length"] = torch.LongTensor([speech.shape[0]])
-        
-        # Handle target units for speech-to-speech
-        if self.data_args.has_tgt_units and "tgt_units" in item:
-            tgt_units_str = item["tgt_units"]
-            tgt_units = [int(x) for x in tgt_units_str.split()]
-            data_dict["tgt_units"] = torch.LongTensor(tgt_units)
-        
-        return data_dict
+            data_dict["speech"] = speech
+            data_dict["speech_length"] = torch.LongTensor([speech.shape[0]])
+            
+            # Handle target units for speech-to-speech
+            if self.data_args.has_tgt_units and "tgt_units" in item:
+                tgt_units_str = item["tgt_units"]
+                tgt_units = [int(x) for x in tgt_units_str.split()]
+                data_dict["tgt_units"] = torch.LongTensor(tgt_units)
+            
+            return data_dict
+        except Exception as e:
+            print(f"Error processing sample {i}: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
 
 @dataclass

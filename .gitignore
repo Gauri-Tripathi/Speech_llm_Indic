@@ -1,0 +1,13 @@
+*.pyc
+llama_omni.egg-info/
+models/
+vocoder/
+*__pycache__/
+*/nlsasfs/home/dibd/dibd-speech/iitm/triga/LLaMA-Omni/exp/data_prep/extracted_audios/
+
+*.wav
+
+
+whisper-large-v3 
+llama-3.2-3b
+llama_omni.egg-info

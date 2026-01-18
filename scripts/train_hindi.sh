@@ -36,7 +36,7 @@ torchrun --nproc_per_node=$NUM_GPUS --master_port=29500 \
     --speech_encoder_type "whisper" \
     --data_path $DATA_PATH \
     --output_dir $OUTPUT_DIR \
-    --s2s True \
+    --s2s False \
     --unit_vocab_size 5100 \
     --ctc_decoder_config "(2,3072,32,8192)" \
     --ctc_upsample_factor 25 \

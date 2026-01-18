@@ -197,33 +197,40 @@ def preprocess_llama_3(
     assert conv.sep_style == conversation_lib.SeparatorStyle.LLAMA_3
 
     # Mask targets
+    # We want to mask the instruction part (human input) and keep the response part (assistant output) as labels
     sep = "<|start_header_id|>" + conv.roles[1] + "<|end_header_id|>\n\n"
     for conversation, target in zip(conversations, targets):
         total_len = int(target.ne(tokenizer.pad_token_id).sum())
 
+        # Mask the BOS token
         cur_len = 1
         target[:cur_len] = IGNORE_INDEX
+        
+        # Split conversation into instruction and response parts
         parts = conversation.split(sep)
-        parts[0] += sep
-
+        if len(parts) != 2:
+            print(f"WARNING: Expected 2 parts after split, got {len(parts)}. Masking all labels.")
+            target[:] = IGNORE_INDEX
+            continue
+            
+        instruction_part = parts[0] + sep  # Everything before assistant's response (including separator)
+        
         if has_speech:
-            conversation_len = len(tokenizer_speech_token(conversation, tokenizer))
-            instruction_len = len(tokenizer_speech_token(parts[0], tokenizer)) - 1
+            instruction_len = len(tokenizer_speech_token(instruction_part, tokenizer)) - 1  # -1 for BOS already counted
         else:
-            conversation_len = len(tokenizer(conversation).input_ids)
-            instruction_len = len(tokenizer(parts[0]).input_ids) - 1
+            instruction_len = len(tokenizer(instruction_part).input_ids) - 1  # -1 for BOS already counted
 
+        # Mask the instruction part (we don't want to predict the instruction)
         target[cur_len : cur_len + instruction_len] = IGNORE_INDEX
-        cur_len += conversation_len
-        target[cur_len:] = IGNORE_INDEX
-
-        # if cur_len < tokenizer.model_max_length:
-        #     if cur_len != total_len:
-        #         target[:] = IGNORE_INDEX
-        #         print(
-        #             f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
-        #             f" (ignored)"
-        #         )
+        
+        # The response part starts right after instruction and should remain as valid labels
+        # Only mask padding tokens at the end
+        target[total_len:] = IGNORE_INDEX
+        
+        # Debug: verify we have valid labels
+        valid_labels = (target != IGNORE_INDEX).sum().item()
+        if valid_labels == 0:
+            print(f"WARNING: No valid labels after masking! total_len={total_len}, instruction_len={instruction_len}")
 
     return dict(
         input_ids=input_ids,

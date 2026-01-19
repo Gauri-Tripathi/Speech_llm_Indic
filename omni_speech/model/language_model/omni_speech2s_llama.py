@@ -107,6 +107,27 @@ class OmniSpeech2SLlamaForCausalLM(OmniSpeechLlamaForCausalLM, GenerationWithCTC
                 lm_loss = llama_output.loss
                 ctc_loss = self.speech_generator(llama_output['hidden_states'][-1], labels, tgt_units)
                 loss = lm_loss + ctc_loss * self.config.ctc_loss_weight
+                
+                # Debug logging (only during initial training steps)
+                if not hasattr(self, '_debug_step_count'):
+                    self._debug_step_count = 0
+                self._debug_step_count += 1
+                
+                if self._debug_step_count <= 10 or self._debug_step_count % 100 == 0:
+                    print(f"[Step {self._debug_step_count}] lm_loss: {lm_loss.item():.4f}, "
+                          f"ctc_loss: {ctc_loss.item():.4f}, "
+                          f"ctc_weight: {self.config.ctc_loss_weight}, "
+                          f"total_loss: {loss.item():.4f}")
+                    
+                    # Check for NaN/Inf
+                    if torch.isnan(loss) or torch.isinf(loss):
+                        print(f"WARNING: Loss is NaN or Inf!")
+                        
+                    # Check if valid labels exist
+                    if labels is not None:
+                        valid_labels = (labels != -100).sum().item()
+                        if valid_labels == 0:
+                            print(f"WARNING: No valid labels in batch! lm_loss may be 0 or NaN.")
         else:
             llama_output = super(OmniSpeechLlamaForCausalLM, self).forward(
                 input_ids=input_ids,

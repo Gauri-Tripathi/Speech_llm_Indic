@@ -44,6 +44,8 @@ class OmniSpeechMetaModel:
         self.config.speech_projector_type = getattr(model_args, 'speech_projector_type', 'linear')
         self.config.speech_encoder_ds_rate = getattr(model_args, 'speech_encoder_ds_rate', 5)
         self.config.speech_encoder_hidden_size = getattr(model_args, 'speech_encoder_hidden_size', 1280)
+        # Store tune_speech_encoder in config so builder can access it
+        self.config.tune_speech_encoder = getattr(model_args, 'tune_speech_encoder', False)
 
         if self.get_speech_encoder() is None:
             speech_encoder = build_speech_encoder(self.config)
@@ -54,10 +56,10 @@ class OmniSpeechMetaModel:
 
         if getattr(self, 'speech_projector', None) is None:
             self.speech_projector = build_speech_projector(self.config)
-        else:
-            # In case it is frozen by LoRA
+            # Newly built projector should be trainable by default
             for p in self.speech_projector.parameters():
                 p.requires_grad = True
+        # Note: Don't automatically unfreeze existing projector - let train.py handle freezing logic
 
         if model_args.pretrain_speech_projector is not None:
             pretrain_speech_projector_weights = torch.load(model_args.pretrain_speech_projector, map_location='cpu')

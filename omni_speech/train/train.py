@@ -83,15 +83,15 @@ class LazySupervisedDataset(Dataset):
         self.data_args = data_args
 
         print(f"Loading data from {data_path}")
-        with open(data_path, "r") as f:
-            self.list_data_dict = json.load(f)
-        print(f"Loaded {len(self.list_data_dict)} samples")
+        from datasets import load_from_disk
+        self.dataset = load_from_disk(data_path)
+        print(f"Loaded {len(self.dataset)} samples")
 
     def __len__(self):
-        return len(self.list_data_dict)
+        return len(self.dataset)
 
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
-        item = self.list_data_dict[i]
+        item = self.dataset[i]
         
         try:
             # Load speech
@@ -179,14 +179,34 @@ class DataCollatorForSupervisedDataset:
         batch["speech"] = speeches_padded
         batch["speech_lengths"] = speech_lengths
 
-        # Handle target units
-        if self.has_tgt_units and "tgt_units" in instances[0]:
-            tgt_units = [instance["tgt_units"] for instance in instances]
-            max_unit_len = max(u.shape[0] for u in tgt_units)
-            tgt_units_padded = torch.full((len(tgt_units), max_unit_len), IGNORE_INDEX, dtype=torch.long)
-            for i, u in enumerate(tgt_units):
-                tgt_units_padded[i, :u.shape[0]] = u
-            batch["tgt_units"] = tgt_units_padded
+        # Handle target units - check all instances have tgt_units
+        if self.has_tgt_units:
+            # Check which instances have tgt_units
+            instances_with_units = [inst for inst in instances if "tgt_units" in inst]
+            
+            if len(instances_with_units) == 0:
+                # No instances have tgt_units, skip
+                print("WARNING: has_tgt_units=True but no instances have tgt_units")
+            elif len(instances_with_units) != len(instances):
+                # Some instances missing tgt_units - this is a data issue
+                print(f"WARNING: {len(instances) - len(instances_with_units)}/{len(instances)} instances missing tgt_units")
+                # Still process the ones that have it
+                tgt_units = [instance.get("tgt_units", torch.LongTensor([0])) for instance in instances]
+                max_unit_len = max(u.shape[0] for u in tgt_units)
+                tgt_units_padded = torch.full((len(tgt_units), max_unit_len), IGNORE_INDEX, dtype=torch.long)
+                for i, u in enumerate(tgt_units):
+                    if "tgt_units" in instances[i]:
+                        tgt_units_padded[i, :u.shape[0]] = u
+                    # else: leave as IGNORE_INDEX
+                batch["tgt_units"] = tgt_units_padded
+            else:
+                # All instances have tgt_units
+                tgt_units = [instance["tgt_units"] for instance in instances]
+                max_unit_len = max(u.shape[0] for u in tgt_units)
+                tgt_units_padded = torch.full((len(tgt_units), max_unit_len), IGNORE_INDEX, dtype=torch.long)
+                for i, u in enumerate(tgt_units):
+                    tgt_units_padded[i, :u.shape[0]] = u
+                batch["tgt_units"] = tgt_units_padded
 
         return batch
 
@@ -266,26 +286,56 @@ def train():
             model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
     # Freeze components as needed
+    # Handle freeze_backbone first
     if model_args.freeze_backbone:
         print("Freezing LLM backbone...")
         model.model.requires_grad_(False)
 
+    # Handle freeze_speech_projector
+    if training_args.freeze_speech_projector:
+        print("Freezing speech projector...")
+        for p in model.get_model().speech_projector.parameters():
+            p.requires_grad = False
+
+    # Handle tune_speech_projector (train projector only, but keep speech generator trainable for s2s)
     if model_args.tune_speech_projector:
-        print("Training speech projector only...")
-        model.requires_grad_(False)
+        print("Training speech projector (and speech generator if s2s)...")
+        # Freeze LLM backbone
+        model.model.requires_grad_(False)
+        # Freeze speech encoder (it's already frozen by default, but be explicit)
+        for p in model.get_model().get_speech_encoder().parameters():
+            p.requires_grad = False
+        # Unfreeze speech projector
         for p in model.get_model().speech_projector.parameters():
             p.requires_grad = True
+        # Keep speech generator trainable for s2s
+        if model_args.s2s and hasattr(model, 'speech_generator'):
+            for p in model.speech_generator.parameters():
+                p.requires_grad = True
 
+    # Handle tune_speech_generator_only (train only speech generator)
     if model_args.tune_speech_generator_only and model_args.s2s:
         print("Training speech generator only...")
         model.requires_grad_(False)
         for p in model.speech_generator.parameters():
             p.requires_grad = True
 
-    # Print trainable parameters
+    # Print detailed trainable parameters info
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"Trainable params: {trainable_params:,} / {total_params:,} ({100 * trainable_params / total_params:.2f}%)")
+    print(f"\nTrainable params: {trainable_params:,} / {total_params:,} ({100 * trainable_params / total_params:.2f}%)")
+    
+    # Log trainable parameter groups for debugging
+    print("\nTrainable parameter groups:")
+    param_groups = {}
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            group = name.split('.')[0] if '.' in name else name
+            if group not in param_groups:
+                param_groups[group] = 0
+            param_groups[group] += param.numel()
+    for group, count in param_groups.items():
+        print(f"  {group}: {count:,} params")
 
     # Make data module
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
